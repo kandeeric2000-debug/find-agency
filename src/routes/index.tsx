@@ -30,6 +30,8 @@ export const Route = createFileRoute("/")({
         content:
           "Automate agency competitor research: live Semrush KD and SERP data, agency-only classification, exact ranking URLs, CSV export.",
       },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: Index,
