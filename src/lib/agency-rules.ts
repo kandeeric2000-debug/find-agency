@@ -83,25 +83,46 @@ export type Verdict = {
 };
 
 /**
- * Blog / article / editorial ranking pages are excluded from competitor selection.
- * The company can still be an agency — this only affects which URL we pick.
+ * Test 2: the exact ranking URL must be a commercial business/service page.
+ * Informational / editorial / article-style URLs are skipped even for real agencies.
+ * Commercial service paths with many words (/services/custom-web-development/) stay GOOD.
  */
-const CONTENT_URL_PATTERNS: { re: RegExp; reason: string }[] = [
-  { re: /\/blogs?(\/|$)/i, reason: "Ranking page is a blog post" },
-  { re: /\/articles?(\/|$)/i, reason: "Ranking page is an article" },
-  { re: /\/news(\/|$)/i, reason: "Ranking page is a news post" },
-  { re: /\/press(-|\/|$)/i, reason: "Ranking page is a press item" },
-  { re: /\/guides?(\/|$)/i, reason: "Ranking page is a guide" },
-  { re: /\/insights?(\/|$)/i, reason: "Ranking page is an insights article" },
-  { re: /\/resources?(\/|$)/i, reason: "Ranking page is a resource article" },
-  { re: /\/magazine(\/|$)/i, reason: "Ranking page is a magazine article" },
-  { re: /\/journal(\/|$)/i, reason: "Ranking page is a journal post" },
-  { re: /\/posts?(\/|$)/i, reason: "Ranking page is a post" },
-  { re: /\/stories(\/|$)/i, reason: "Ranking page is a story" },
-  { re: /\/learn(\/|$)/i, reason: "Ranking page is a learning article" },
-  { re: /\/tips(\/|$)/i, reason: "Ranking page is a tips article" },
-  { re: /\/(careers?|jobs?|hiring|vacanc)(\/|$)/i, reason: "Ranking page is a jobs/careers page" },
-  { re: /\/\d{4}\/\d{2}\//, reason: "Ranking page is a dated editorial post" },
+const SECTION_PATTERNS: { re: RegExp; reason: string }[] = [
+  { re: /\/blogs?(\/|$)/i, reason: "Ranking URL is a blog post" },
+  { re: /\/articles?(\/|$)/i, reason: "Ranking URL is an article" },
+  { re: /\/news(\/|$)/i, reason: "Ranking URL is a news post" },
+  { re: /\/press(-|\/|$)/i, reason: "Ranking URL is a press item" },
+  { re: /\/guides?(\/|$)/i, reason: "Ranking URL is a guide" },
+  { re: /\/insights?(\/|$)/i, reason: "Ranking URL is an insights article" },
+  { re: /\/resources?(\/|$)/i, reason: "Ranking URL is a resource article" },
+  { re: /\/magazine(\/|$)/i, reason: "Ranking URL is a magazine article" },
+  { re: /\/journal(\/|$)/i, reason: "Ranking URL is a journal post" },
+  { re: /\/posts?(\/|$)/i, reason: "Ranking URL is a post" },
+  { re: /\/stories(\/|$)/i, reason: "Ranking URL is a story" },
+  { re: /\/learn(\/|$)/i, reason: "Ranking URL is a learning article" },
+  { re: /\/tips(\/|$)/i, reason: "Ranking URL is a tips article" },
+  { re: /\/(faqs?|glossary|wiki)(\/|$)/i, reason: "Ranking URL is a reference page" },
+  { re: /\/(careers?|jobs?|hiring|vacanc)(\/|$)/i, reason: "Ranking URL is a jobs/careers page" },
+  { re: /\/\d{4}\/\d{2}\//, reason: "Ranking URL is a dated editorial post" },
+];
+
+/** Question-style / article-title-style slugs. Matched against the last path segment. */
+const INFORMATIONAL_SLUG_PATTERNS: { re: RegExp; reason: string }[] = [
+  { re: /^(what|why|how|does|do|is|are|can|should|when|which|who|will|if)-/i, reason: "Ranking URL is a question-style article" },
+  { re: /-(guide|guides|checklist|explained|examples|ideas|mistakes|trends|statistics|stats|faq)$/i, reason: "Ranking URL is an informational article" },
+  { re: /(^|-)(everything-you-need-to-know|need-to-know|ultimate-guide|complete-guide|beginners-guide|step-by-step)(-|$)/i, reason: "Ranking URL is a guide article" },
+  { re: /(^|-)(the-connection-between|difference-between|vs)(-|$)/i, reason: "Ranking URL is a comparison article" },
+  { re: /^(top|best)-/i, reason: "Ranking URL is a listicle" },
+  { re: /^\d+-/i, reason: "Ranking URL is a listicle" },
+  { re: /(^|-)(tips|reasons|benefits|examples|trends)(-|$)/i, reason: "Ranking URL is an informational article" },
+  { re: /(^|-)(guide-to|how-to|introduction-to)(-|$)/i, reason: "Ranking URL is a how-to article" },
+  { re: /(^|-)case-stud(y|ies)(-|$)/i, reason: "Ranking URL is a case study" },
+];
+
+/** Paths that are clearly commercial, even when long or multi-word. */
+const COMMERCIAL_PATTERNS = [
+  /\/(services?|service-areas?|solutions?|packages?|pricing|plans?|rates?|quote|contact|about|portfolio|work|industries|locations?|our-work)(\/|$)/i,
+  /(web-design|web-development|website-design|website-development|seo|digital-marketing|branding|app-development|software-development|ppc|ecommerce|e-commerce)-(services?|company|companies|agency|agencies|packages?|pricing)(\/|$)/i,
 ];
 
 export function contentPageReason(url: string): string | null {
@@ -111,8 +132,24 @@ export function contentPageReason(url: string): string | null {
   } catch {
     // fall back to raw string matching
   }
-  for (const { re, reason } of CONTENT_URL_PATTERNS) {
+  const clean = path.replace(/\/+$/, "");
+  // Homepage is always a proper business URL.
+  if (clean === "" || /^\/(en|us|uk|de|fr|es|it|nl|in|br|mx|ae|se|no|dk)$/i.test(clean)) return null;
+
+  for (const { re, reason } of SECTION_PATTERNS) {
     if (re.test(path)) return reason;
+  }
+
+  if (COMMERCIAL_PATTERNS.some((re) => re.test(clean))) return null;
+
+  const slug = clean.split("/").filter(Boolean).pop() ?? "";
+  const bare = slug.replace(/\.(html?|php|aspx?)$/i, "");
+  for (const { re, reason } of INFORMATIONAL_SLUG_PATTERNS) {
+    if (re.test(bare)) return reason;
+  }
+  // Long article-title-style slugs (6+ words) are editorial, not commercial pages.
+  if (bare.split("-").filter(Boolean).length >= 6) {
+    return "Ranking URL is an article-style page";
   }
   return null;
 }
