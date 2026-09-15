@@ -1,14 +1,16 @@
 ---
 name: Classification rules
-description: Competitor qualification rules — agency status is the ONLY criterion; page type and URL structure are irrelevant
+description: Competitor qualification — company must be an agency AND the ranking page must not be a blog/article/jobs page
 type: feature
 ---
 
-The ONLY qualification question is: "Is the company behind this domain an agency?"
+Two-step qualification:
 
-- Page type / URL structure is IRRELEVANT. Blog posts, articles, guides, listicles, homepages, service pages, location pages, resources, case studies all qualify if the publisher is an agency. Never reject an agency because its ranking URL is a blog/article/jobs page. (User explicitly reversed an earlier blog/jobs-URL exclusion rule — do not re-add it.)
-- The exact live Semrush ranking URL is preserved — never swap it for the domain's homepage or a service page, never fabricate URLs.
+1. Company test (AI/rules): "Is the business behind this domain an agency?" Judge the company from website evidence, never from the domain name or URL shape.
+2. Page test (selection only): blog / article / news / guide / insights / resources / magazine / journal / post / story / learn / tips / careers-jobs / dated editorial URLs are NOT selected as competitors, even when the company is an agency. (User reversed the earlier "page type irrelevant" rule on 2026-09-15: "blogs articles should be removed".)
+
+- The exact live Semrush ranking URL is preserved for selected competitors — never swap it for a homepage or service page, never fabricate URLs.
 - Reject non-agencies: marketplaces (Upwork, Fiverr, Toptal, Freelancer, Contra), directories/review sites (Clutch, DesignRush, Semrush, GoodFirms, Sortlist), SaaS (Wix, Squarespace, HubSpot), forums/social (Reddit, YouTube, Quora, LinkedIn), publishers/media, job boards, staffing/talent marketplaces, individual freelancers, accounting firms / big consultancies (e.g. PwC).
 - A company offering web design, web development, SEO, marketing, branding, or related client services qualifies — it need not specialize exclusively in the researched keyword.
 - Manual user overrides always win over rule/cache/AI verdicts.
-- Selection: walk live SERP from #1, take first two agencies, stop at 2; "No second competitor" / "No competitors" when fewer. Missing evidence → Needs Review, never guess.
+- Selection: walk live SERP from #1, take first two qualifying results, stop at 2; "No second competitor" / "No competitors" when fewer. Missing evidence → Needs Review, never guess.

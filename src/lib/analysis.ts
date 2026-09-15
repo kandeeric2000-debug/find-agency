@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { classifyDomains, fetchKeywordData, type SerpRow } from "@/lib/semrush.functions";
-import { ruleVerdict, rootDomain, type Verdict } from "@/lib/agency-rules";
+import { ruleVerdict, rootDomain, contentPageReason, type Verdict } from "@/lib/agency-rules";
 
 export type Evaluated = SerpRow & {
   isAgency: boolean | null;
@@ -191,11 +191,16 @@ export function pickCompetitors(
         source: "ai" as const,
       };
     const alreadyPicked = competitors.some((c) => rootDomain(c.domain) === rootDomain(row.domain));
-    const select = verdict.isAgency === true && competitors.length < 2 && !alreadyPicked;
+    // Blog/article ranking pages are skipped, even for agencies.
+    const contentReason = contentPageReason(row.url);
+    const select =
+      verdict.isAgency === true && !contentReason && competitors.length < 2 && !alreadyPicked;
     const item: Evaluated = {
       ...row,
       isAgency: verdict.isAgency,
-      reason: verdict.reason,
+      reason: contentReason
+        ? `${verdict.reason} — skipped: ${contentReason.toLowerCase()}`
+        : verdict.reason,
       source: verdict.source,
       companyName: verdict.companyName ?? null,
       selected: select,
