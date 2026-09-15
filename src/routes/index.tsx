@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Play, RefreshCw, ScanSearch, Download, Copy, Plus, Loader2 } from "lucide-react";
+import { Play, RefreshCw, ScanSearch, Download, Copy, Plus, Loader2, FileText } from "lucide-react";
 import { PageConfig } from "@/components/PageConfig";
 import { ResultsView } from "@/components/ResultsView";
 import {
@@ -208,6 +208,22 @@ function Index() {
     URL.revokeObjectURL(url);
   };
 
+  const exportDocx = async () => {
+    if (results.length === 0) {
+      toast.error("Nothing to export yet.");
+      return;
+    }
+    const { buildResultsDocx } = await import("@/lib/docx-export");
+    const blob = await buildResultsDocx(results);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `agency-competitors-${new Date().toISOString().slice(0, 10)}.docx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Word document downloaded.");
+  };
+
   const copyResults = async () => {
     if (results.length === 0) {
       toast.error("Nothing to copy yet.");
@@ -269,6 +285,9 @@ function Index() {
         </button>
         <button className="btn-base btn-ghost" onClick={exportCsv}>
           <Download className="size-4" /> Export CSV
+        </button>
+        <button className="btn-base btn-ghost" onClick={exportDocx}>
+          <FileText className="size-4" /> Download DOCX
         </button>
         <button className="btn-base btn-ghost" onClick={copyResults}>
           <Copy className="size-4" /> Copy Results
