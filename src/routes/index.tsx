@@ -30,6 +30,8 @@ export const Route = createFileRoute("/")({
         content:
           "Automate agency competitor research: live Semrush KD and SERP data, agency-only classification, exact ranking URLs, CSV export.",
       },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: Index,
@@ -117,6 +119,7 @@ function Index() {
           list.push({
             keyword: job.keyword,
             kd: null,
+            serp: [],
             evaluated: [],
             competitors: [],
             needsReview: true,
@@ -257,7 +260,7 @@ function Index() {
         <button
           className="btn-base btn-ghost"
           disabled={running}
-          onClick={() => runAnalysis({ skipCache: false })}
+          onClick={() => runAnalysis({ skipCache: true })}
         >
           <RefreshCw className="size-4" /> Refresh Live SERPs
         </button>
