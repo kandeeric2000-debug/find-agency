@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { classifyDomains, fetchKeywordData, type SerpRow } from "@/lib/semrush.functions";
-import { ruleVerdict, rootDomain, type Verdict } from "@/lib/agency-rules";
+import { ruleVerdict, rootDomain, urlVerdict, type Verdict } from "@/lib/agency-rules";
 
 export type Evaluated = SerpRow & {
   isAgency: boolean | null;
@@ -171,11 +171,13 @@ export function pickCompetitors(
   let needsReview = false;
 
   for (const row of serp) {
-    const verdict = verdicts.get(row.domain) ?? {
-      isAgency: null,
-      reason: "No classification available",
-      source: "ai" as const,
-    };
+    // URL-level rules (blog/article/jobs pages) always reject, even for agency domains.
+    const verdict = urlVerdict(row.url) ??
+      verdicts.get(row.domain) ?? {
+        isAgency: null,
+        reason: "No classification available",
+        source: "ai" as const,
+      };
     const alreadyPicked = competitors.some((c) => rootDomain(c.domain) === rootDomain(row.domain));
     const select = verdict.isAgency === true && competitors.length < 2 && !alreadyPicked;
     const item: Evaluated = {

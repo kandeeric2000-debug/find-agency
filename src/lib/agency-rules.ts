@@ -49,6 +49,7 @@ export const NON_AGENCY_DOMAINS: Record<string, string> = {
   "producthunt.com": "Directory, not an agency",
   "stackoverflow.com": "Forum, not an agency",
   "github.com": "Code platform, not an agency",
+  "pwc.com": "Professional services / accounting firm, not an agency",
 };
 
 export const KNOWN_AGENCY_DOMAINS: Record<string, string> = {
@@ -91,6 +92,29 @@ export function ruleVerdict(domain: string): Verdict | null {
     if (KNOWN_AGENCY_DOMAINS[key]) {
       return { isAgency: true, reason: KNOWN_AGENCY_DOMAINS[key], source: "rule" };
     }
+  }
+  return null;
+}
+
+// Ranking-URL rules: editorial/blog and jobs content never counts as a
+// competitor, even when the publisher behind it is an agency.
+const CONTENT_HOST_RE = /^(blog|blogs|news|articles?|insights?|resources?|learn|guides?)\./i;
+const CONTENT_PATH_RE = /\/(blog|blogs|articles?|insights?|news|resources?|learn|guides?|posts?)(\/|$)/i;
+const JOBS_PATH_RE = /\/(jobs|careers|vacancies|job-board)(\/|$)/i;
+
+export function urlVerdict(url: string): Verdict | null {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    if (CONTENT_HOST_RE.test(host) || CONTENT_PATH_RE.test(path)) {
+      return { isAgency: false, reason: "Blog/article URL — excluded", source: "rule" };
+    }
+    if (JOBS_PATH_RE.test(path)) {
+      return { isAgency: false, reason: "Jobs/careers page — excluded", source: "rule" };
+    }
+  } catch {
+    // Unparseable URL — fall through to domain classification.
   }
   return null;
 }
