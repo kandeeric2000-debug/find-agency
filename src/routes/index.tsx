@@ -286,6 +286,9 @@ function Index() {
         <button className="btn-base btn-ghost" onClick={exportCsv}>
           <Download className="size-4" /> Export CSV
         </button>
+        <button className="btn-base btn-ghost" onClick={exportDocx}>
+          <FileText className="size-4" /> Download DOCX
+        </button>
         <button className="btn-base btn-ghost" onClick={copyResults}>
           <Copy className="size-4" /> Copy Results
         </button>
