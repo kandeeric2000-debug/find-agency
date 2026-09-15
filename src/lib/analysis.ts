@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { classifyDomains, fetchKeywordData, type SerpRow } from "@/lib/semrush.functions";
-import { ruleVerdict, rootDomain, type Verdict } from "@/lib/agency-rules";
+import { ruleVerdict, rootDomain, contentPageReason, type Verdict } from "@/lib/agency-rules";
 
 export type Evaluated = SerpRow & {
   isAgency: boolean | null;
