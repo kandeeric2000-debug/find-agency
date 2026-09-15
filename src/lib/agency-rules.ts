@@ -82,6 +82,41 @@ export type Verdict = {
   companyName?: string | null;
 };
 
+/**
+ * Blog / article / editorial ranking pages are excluded from competitor selection.
+ * The company can still be an agency — this only affects which URL we pick.
+ */
+const CONTENT_URL_PATTERNS: { re: RegExp; reason: string }[] = [
+  { re: /\/blogs?(\/|$)/i, reason: "Ranking page is a blog post" },
+  { re: /\/articles?(\/|$)/i, reason: "Ranking page is an article" },
+  { re: /\/news(\/|$)/i, reason: "Ranking page is a news post" },
+  { re: /\/press(-|\/|$)/i, reason: "Ranking page is a press item" },
+  { re: /\/guides?(\/|$)/i, reason: "Ranking page is a guide" },
+  { re: /\/insights?(\/|$)/i, reason: "Ranking page is an insights article" },
+  { re: /\/resources?(\/|$)/i, reason: "Ranking page is a resource article" },
+  { re: /\/magazine(\/|$)/i, reason: "Ranking page is a magazine article" },
+  { re: /\/journal(\/|$)/i, reason: "Ranking page is a journal post" },
+  { re: /\/posts?(\/|$)/i, reason: "Ranking page is a post" },
+  { re: /\/stories(\/|$)/i, reason: "Ranking page is a story" },
+  { re: /\/learn(\/|$)/i, reason: "Ranking page is a learning article" },
+  { re: /\/tips(\/|$)/i, reason: "Ranking page is a tips article" },
+  { re: /\/(careers?|jobs?|hiring|vacanc)(\/|$)/i, reason: "Ranking page is a jobs/careers page" },
+  { re: /\/\d{4}\/\d{2}\//, reason: "Ranking page is a dated editorial post" },
+];
+
+export function contentPageReason(url: string): string | null {
+  let path = url;
+  try {
+    path = new URL(url.startsWith("http") ? url : `https://${url}`).pathname;
+  } catch {
+    // fall back to raw string matching
+  }
+  for (const { re, reason } of CONTENT_URL_PATTERNS) {
+    if (re.test(path)) return reason;
+  }
+  return null;
+}
+
 export function ruleVerdict(domain: string): Verdict | null {
   const clean = domain.toLowerCase().replace(/^www\./, "");
   const root = rootDomain(domain);
