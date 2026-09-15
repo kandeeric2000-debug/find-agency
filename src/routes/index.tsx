@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Play, RefreshCw, ScanSearch, Download, Copy, Plus, Loader2 } from "lucide-react";
+import { Play, RefreshCw, ScanSearch, Download, Copy, Plus, Loader2, FileText } from "lucide-react";
 import { PageConfig } from "@/components/PageConfig";
 import { ResultsView } from "@/components/ResultsView";
 import {
