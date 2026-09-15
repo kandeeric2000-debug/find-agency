@@ -117,7 +117,7 @@ AGENCY = a company that sells client services delivered by its own team: SEO age
 NOT AGENCY = marketplaces and talent platforms (Upwork, Fiverr, Toptal, Freelancer.com, Contra, Arc.dev), directories and review sites (Clutch, DesignRush, Semrush Agency Directory, GoodFirms, Sortlist), SaaS/software products (Wix, Squarespace, Semrush, HubSpot), forums and social networks (Reddit, Quora, LinkedIn, YouTube), publishers and news sites, job boards, staffing marketplaces, and individual freelancers/solo portfolios.
 
 Rules:
-- Judge the COMPANY. Blog, article and jobs URLs are excluded separately by rule, so classify the company itself.
+- Judge ONLY the COMPANY behind the domain. Page type and URL structure are irrelevant: a blog post, article, guide, listicle, or any other page published by an agency still qualifies. Never reject an agency because of its ranking page type.
 - Accounting firms, big consultancies, publishers and media companies are NOT agencies for this purpose.
 - If you do not recognise the company and cannot reasonably determine what it is, return isAgency: null.
 - Never invent company names.
