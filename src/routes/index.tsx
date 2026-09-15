@@ -208,6 +208,22 @@ function Index() {
     URL.revokeObjectURL(url);
   };
 
+  const exportDocx = async () => {
+    if (results.length === 0) {
+      toast.error("Nothing to export yet.");
+      return;
+    }
+    const { buildResultsDocx } = await import("@/lib/docx-export");
+    const blob = await buildResultsDocx(results);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `agency-competitors-${new Date().toISOString().slice(0, 10)}.docx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Word document downloaded.");
+  };
+
   const copyResults = async () => {
     if (results.length === 0) {
       toast.error("Nothing to copy yet.");
