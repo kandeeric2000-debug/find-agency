@@ -117,6 +117,7 @@ function Index() {
           list.push({
             keyword: job.keyword,
             kd: null,
+            serp: [],
             evaluated: [],
             competitors: [],
             needsReview: true,
@@ -257,7 +258,7 @@ function Index() {
         <button
           className="btn-base btn-ghost"
           disabled={running}
-          onClick={() => runAnalysis({ skipCache: false })}
+          onClick={() => runAnalysis({ skipCache: true })}
         >
           <RefreshCw className="size-4" /> Refresh Live SERPs
         </button>

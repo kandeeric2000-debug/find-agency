@@ -117,12 +117,51 @@ AGENCY = a company that sells client services delivered by its own team: SEO age
 NOT AGENCY = marketplaces and talent platforms (Upwork, Fiverr, Toptal, Freelancer.com, Contra, Arc.dev), directories and review sites (Clutch, DesignRush, Semrush Agency Directory, GoodFirms, Sortlist), SaaS/software products (Wix, Squarespace, Semrush, HubSpot), forums and social networks (Reddit, Quora, LinkedIn, YouTube), publishers and news sites, job boards, staffing marketplaces, and individual freelancers/solo portfolios.
 
 Rules:
+- Base the decision on the supplied website evidence, not assumptions from the domain name.
 - Judge ONLY the COMPANY behind the domain. Page type and URL structure are irrelevant: a blog post, article, guide, listicle, or any other page published by an agency still qualifies. Never reject an agency because of its ranking page type.
 - Accounting firms, big consultancies, publishers and media companies are NOT agencies for this purpose.
 - If you do not recognise the company and cannot reasonably determine what it is, return isAgency: null.
 - Never invent company names.
 
 Return ONLY JSON: {"results":[{"domain":"...","companyName":"...","isAgency":true|false|null,"reason":"short reason"}]}`;
+
+function safeDomain(domain: string): boolean {
+  return /^(?=.{1,253}$)(?!-)(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(domain);
+}
+
+function summarizeHtml(html: string): string {
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "";
+  const description =
+    html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i)?.[1] ??
+    html.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i)?.[1] ??
+    "";
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `Title: ${title.replace(/\s+/g, " ").trim()}\nDescription: ${description.trim()}\nPage text: ${text.slice(0, 6000)}`;
+}
+
+async function getCompanyEvidence(domain: string): Promise<string> {
+  if (!safeDomain(domain)) return "Website evidence unavailable: invalid public domain.";
+  try {
+    const response = await fetch(`https://${domain}/`, {
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; AgencySERPFinder/1.0)" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return `Website evidence unavailable: homepage returned ${response.status}.`;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html")) return "Website evidence unavailable: homepage is not HTML.";
+    return summarizeHtml((await response.text()).slice(0, 250_000));
+  } catch {
+    return "Website evidence unavailable: homepage could not be reached.";
+  }
+}
 
 /** AI classification for domains with no rule/cache verdict. */
 export const classifyDomains = createServerFn({ method: "POST" })
@@ -137,6 +176,9 @@ export const classifyDomains = createServerFn({ method: "POST" })
     const key = process.env["LOVABLE_API_KEY"];
     if (!key) throw new Error("AI classification is unavailable.");
 
+    const evidence = await Promise.all(
+      data.domains.map(async (domain) => ({ domain, evidence: await getCompanyEvidence(domain) })),
+    );
     const res = await fetch(AI_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -146,7 +188,9 @@ export const classifyDomains = createServerFn({ method: "POST" })
           { role: "system", content: SYSTEM_PROMPT },
           {
             role: "user",
-            content: `Classify these domains:\n${data.domains.join("\n")}`,
+            content: `Classify these companies from their website evidence. If evidence is unavailable and the company is not clearly known, return null.\n\n${evidence
+              .map((item) => `DOMAIN: ${item.domain}\n${item.evidence}`)
+              .join("\n\n---\n\n")}`,
           },
         ],
         response_format: { type: "json_object" },

@@ -13,6 +13,7 @@ export type Evaluated = SerpRow & {
 export type KeywordResult = {
   keyword: string;
   kd: number | null;
+  serp?: SerpRow[];
   evaluated: Evaluated[];
   competitors: Evaluated[];
   needsReview: boolean;
@@ -76,6 +77,8 @@ export async function loadCache(domains: string[]): Promise<Map<string, Verdict>
     return map;
   }
   for (const row of (data ?? []) as CacheRow[]) {
+    // Older AI rows were based only on a domain name. Do not reuse them.
+    if (row.source !== "manual" && row.source !== "ai-evidence-v2") continue;
     map.set(row.domain, {
       isAgency: row.is_agency,
       reason: row.reason,
@@ -88,7 +91,12 @@ export async function loadCache(domains: string[]): Promise<Map<string, Verdict>
 
 export async function saveVerdict(
   domain: string,
-  verdict: { isAgency: boolean | null; reason: string; source: "ai" | "manual"; companyName?: string | null },
+  verdict: {
+    isAgency: boolean | null;
+    reason: string;
+    source: "ai-evidence-v2" | "manual";
+    companyName?: string | null;
+  },
 ) {
   const { error } = await supabase.from("domain_classifications").upsert(
     {
@@ -111,26 +119,24 @@ export async function resolveVerdicts(
   const out = new Map<string, Verdict>();
   const unknown: string[] = [];
 
-  const cache = opts.skipCache ? new Map<string, Verdict>() : await loadCache(domains);
+  const normalized = Array.from(new Set(domains.map(rootDomain)));
+  const cache = await loadCache(normalized);
 
-  for (const domain of new Set(domains)) {
+  for (const domain of normalized) {
+    const cached = cache.get(domain);
+    // A person's decision is authoritative, including over deterministic rules.
+    if (cached?.source === "manual") {
+      out.set(domain, cached);
+      continue;
+    }
     const rule = ruleVerdict(domain);
     if (rule) {
       out.set(domain, rule);
       continue;
     }
-    const cached = cache.get(rootDomain(domain));
-    // Manual overrides always win, even on a forced re-check.
-    if (cached && (cached.source === "manual" || !opts.skipCache) && cached.isAgency !== null) {
+    if (cached && !opts.skipCache) {
       out.set(domain, cached);
       continue;
-    }
-    if (opts.skipCache) {
-      const manual = (await loadCache([domain])).get(rootDomain(domain));
-      if (manual?.source === "manual") {
-        out.set(domain, manual);
-        continue;
-      }
     }
     unknown.push(domain);
   }
@@ -150,7 +156,14 @@ export async function resolveVerdicts(
           await saveVerdict(v.domain, {
             isAgency: v.isAgency,
             reason: v.reason,
-            source: "ai",
+            source: "ai-evidence-v2",
+            companyName: v.companyName,
+          });
+        } else {
+          await saveVerdict(v.domain, {
+            isAgency: null,
+            reason: v.reason,
+            source: "ai-evidence-v2",
             companyName: v.companyName,
           });
         }
@@ -172,7 +185,7 @@ export function pickCompetitors(
 
   for (const row of serp) {
     // Only the company behind the domain matters — page type / URL structure is irrelevant.
-    const verdict = verdicts.get(row.domain) ?? {
+    const verdict = verdicts.get(rootDomain(row.domain)) ?? {
         isAgency: null,
         reason: "No classification available",
         source: "ai" as const,
@@ -201,11 +214,12 @@ export async function analyzeKeyword(
   database: string,
   opts: { skipCache?: boolean } = {},
 ): Promise<KeywordResult> {
-  const data = await fetchKeywordData({ data: { keyword, database, serpDepth: 20 } });
+  const data = await fetchKeywordData({ data: { keyword, database, serpDepth: 50 } });
   if (data.error) {
     return {
       keyword,
       kd: data.kd,
+      serp: [],
       evaluated: [],
       competitors: [],
       needsReview: true,
@@ -213,14 +227,20 @@ export async function analyzeKeyword(
       fetchedAt: new Date().toISOString(),
     };
   }
-  const verdicts = await resolveVerdicts(
-    data.serp.map((r) => r.domain),
-    opts,
-  );
-  const { evaluated, competitors, needsReview } = pickCompetitors(data.serp, verdicts);
+  const verdicts = new Map<string, Verdict>();
+  let selection = { evaluated: [] as Evaluated[], competitors: [] as Evaluated[], needsReview: false };
+  for (let i = 0; i < data.serp.length; i += 10) {
+    const rows = data.serp.slice(i, i + 10);
+    const batch = await resolveVerdicts(rows.map((r) => r.domain), opts);
+    for (const [domain, verdict] of batch) verdicts.set(domain, verdict);
+    selection = pickCompetitors(data.serp.slice(0, i + 10), verdicts);
+    if (selection.competitors.length === 2) break;
+  }
+  const { evaluated, competitors, needsReview } = selection;
   return {
     keyword,
     kd: data.kd,
+    serp: data.serp,
     evaluated,
     competitors,
     needsReview: needsReview || data.kd === null,
@@ -234,14 +254,24 @@ export async function reclassify(
   result: KeywordResult,
   opts: { skipCache?: boolean } = {},
 ): Promise<KeywordResult> {
-  if (result.evaluated.length === 0) return result;
-  const serp: SerpRow[] = result.evaluated.map(({ position, url, domain }) => ({ position, url, domain }));
-  const verdicts = await resolveVerdicts(
-    serp.map((r) => r.domain),
-    opts,
-  );
-  const { evaluated, competitors, needsReview } = pickCompetitors(serp, verdicts);
-  return { ...result, evaluated, competitors, needsReview: needsReview || result.kd === null };
+  const serp: SerpRow[] = result.serp?.length
+    ? result.serp
+    : result.evaluated.map(({ position, url, domain }) => ({ position, url, domain }));
+  if (serp.length === 0) return result;
+  const verdicts = new Map<string, Verdict>();
+  let selection = { evaluated: [] as Evaluated[], competitors: [] as Evaluated[], needsReview: false };
+  for (let i = 0; i < serp.length; i += 10) {
+    const batch = await resolveVerdicts(serp.slice(i, i + 10).map((r) => r.domain), opts);
+    for (const [domain, verdict] of batch) verdicts.set(domain, verdict);
+    selection = pickCompetitors(serp.slice(0, i + 10), verdicts);
+    if (selection.competitors.length === 2) break;
+  }
+  return {
+    ...result,
+    serp,
+    ...selection,
+    needsReview: selection.needsReview || result.kd === null,
+  };
 }
 
 export function formatKeywordBlock(r: KeywordResult): string {
