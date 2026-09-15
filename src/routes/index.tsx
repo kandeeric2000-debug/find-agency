@@ -192,7 +192,10 @@ function Index() {
   );
 
   const exportCsv = () => {
-    if (results.length === 0) return toast.error("Nothing to export yet.");
+    if (results.length === 0) {
+      toast.error("Nothing to export yet.");
+      return;
+    }
     const blob = new Blob([toCsv(results)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -203,10 +206,14 @@ function Index() {
   };
 
   const copyResults = async () => {
-    if (results.length === 0) return toast.error("Nothing to copy yet.");
+    if (results.length === 0) {
+      toast.error("Nothing to copy yet.");
+      return;
+    }
     await navigator.clipboard.writeText(results.map(formatPageBlock).join("\n\n\n"));
     toast.success("Results copied.");
   };
+
 
   return (
     <main className="mx-auto w-full max-w-5xl px-5 py-10">
