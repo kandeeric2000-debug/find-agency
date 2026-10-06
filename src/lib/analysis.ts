@@ -179,25 +179,8 @@ export async function classifyResults(
   return { results: out, summary: { aiRequests: session.aiRequests, aiUnavailable: session.aiDisabledReason } };
 }
 
-export function formatKeywordBlock(r: KeywordResult): string {
-  const head = `${r.keyword} — KD ${r.kd ?? "??"}`;
-  if (r.error) return `${head}\nNeeds Review (${r.error})`;
-  if (r.competitors.length === 0) return `${head}\nNo competitors`;
-  if (r.competitors.length === 1) return `${head}\n${r.competitors[0]!.url}\nNo second competitor`;
-  return `${head}\n${r.competitors[0]!.url}\n${r.competitors[1]!.url}`;
-}
-
-export function formatPageBlock(page: PageResult): string {
-  const header = [
-    `Page: ${page.page.name || "(unnamed)"} — ${page.page.country}`,
-    page.page.rank ? `Page Rank: #${page.page.rank}` : null,
-    page.page.targetUrl ? `URL: ${page.page.targetUrl}` : null,
-    `Country: ${page.page.country}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  return `${header}\n\n${page.keywords.map(formatKeywordBlock).join("\n\n")}`;
-}
+// Copy-output formatting lives in copy-format.ts (pure, unit-tested module).
+export { formatKeywordBlock, formatPageBlock } from "@/lib/copy-format";
 
 export function toCsv(pages: PageResult[]): string {
   const header = [
