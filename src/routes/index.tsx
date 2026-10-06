@@ -5,9 +5,10 @@ import { Play, RefreshCw, ScanSearch, Download, Copy, Plus, Loader2, FileText } 
 import { PageConfig } from "@/components/PageConfig";
 import { ResultsView } from "@/components/ResultsView";
 import {
-  analyzeKeyword,
+  analyzeBatch,
+  classifyResults,
   formatPageBlock,
-  reclassify,
+  type RunSummary,
   saveVerdict,
   toCsv,
   type KeywordResult,
@@ -92,86 +93,76 @@ function Index() {
 
   const running = progress !== null;
 
-  const runAnalysis = useCallback(
-    async (opts: { skipCache?: boolean } = {}) => {
-      if (keywordJobs.length === 0) {
-        toast.error("Add at least one keyword first.");
-        return;
-      }
-      const total = keywordJobs.length;
-      setProgress({ done: 0, total, label: "Starting" });
-      const collected = new Map<string, KeywordResult[]>();
-      let failures = 0;
-
-      for (let i = 0; i < keywordJobs.length; i++) {
-        const job = keywordJobs[i]!;
-        setProgress({ done: i, total, label: job.keyword });
-        try {
-          const result = await analyzeKeyword(job.keyword, job.page.database, opts);
-          if (result.error) failures++;
-          const list = collected.get(job.page.id) ?? [];
-          list.push(result);
-          collected.set(job.page.id, list);
-        } catch (e) {
-          failures++;
-          const message = e instanceof Error ? e.message : "Unknown error";
-          const list = collected.get(job.page.id) ?? [];
-          list.push({
-            keyword: job.keyword,
-            kd: null,
-            serp: [],
-            evaluated: [],
-            competitors: [],
-            needsReview: true,
-            error: message,
-            fetchedAt: new Date().toISOString(),
-          });
-          collected.set(job.page.id, list);
-        }
-        setResults(
-          pages
-            .filter((p) => collected.has(p.id))
-            .map((p) => {
-              const { keywords: _kw, ...page } = p;
-              return { pageId: p.id, page, keywords: collected.get(p.id) ?? [] };
-            }),
-        );
-      }
-
-      setProgress(null);
-      if (failures > 0) toast.warning(`${failures} of ${total} keywords need review.`);
-      else toast.success(`${total} keywords analyzed.`);
+  const regroup = useCallback(
+    (source: { pageId: string }[], flat: KeywordResult[], template: PageResult[] | PageInput[]) => {
+      const byPage = new Map<string, KeywordResult[]>();
+      source.forEach((s, i) => {
+        const list = byPage.get(s.pageId) ?? [];
+        list.push(flat[i]!);
+        byPage.set(s.pageId, list);
+      });
+      return template
+        .map((t) => ("pageId" in t ? t.pageId : t.id))
+        .filter((id) => byPage.has(id))
+        .map((id) => {
+          const existing = results.find((r) => r.pageId === id);
+          const input = pages.find((p) => p.id === id);
+          const page = input
+            ? (({ keywords: _kw, ...rest }) => rest)(input)
+            : existing!.page;
+          return { pageId: id, page, keywords: byPage.get(id)! };
+        });
     },
-    [keywordJobs, pages],
+    [pages, results],
   );
+
+  const reportSummary = (summary: RunSummary, failures: number, total: number, verb: string) => {
+    if (summary.aiUnavailable) {
+      toast.warning(
+        `${verb} all ${total} keywords. AI classification unavailable (${summary.aiUnavailable}) — undecided companies are marked Needs Review.`,
+      );
+    } else if (failures > 0) toast.warning(`${failures} of ${total} keywords need review.`);
+    else toast.success(`${total} keywords ${verb.toLowerCase()}.`);
+  };
+
+  const runAnalysis = useCallback(async () => {
+    if (keywordJobs.length === 0) {
+      toast.error("Add at least one keyword first.");
+      return;
+    }
+    const total = keywordJobs.length;
+    setProgress({ done: 0, total, label: "Starting" });
+    try {
+      const { results: flat, summary } = await analyzeBatch(
+        keywordJobs.map((j) => ({ keyword: j.keyword, database: j.page.database })),
+        (done, label) => setProgress({ done, total, label }),
+      );
+      setResults(regroup(keywordJobs.map((j) => ({ pageId: j.page.id })), flat, pages));
+      reportSummary(summary, flat.filter((r) => r.error).length, total, "Analyzed");
+    } catch (e) {
+      console.error(e);
+      toast.error("Analysis failed unexpectedly.");
+    } finally {
+      setProgress(null);
+    }
+  }, [keywordJobs, pages, regroup]);
 
   const recheckClassification = useCallback(async () => {
     if (results.length === 0) {
       toast.error("Run an analysis first.");
       return;
     }
-    const total = results.reduce((sum, p) => sum + p.keywords.length, 0);
-    setProgress({ done: 0, total, label: "Re-checking classifications" });
-    let done = 0;
-    const next: PageResult[] = [];
-    for (const page of results) {
-      const keywords: KeywordResult[] = [];
-      for (const k of page.keywords) {
-        setProgress({ done, total, label: k.keyword });
-        try {
-          keywords.push(await reclassify(k, { skipCache: true }));
-        } catch (e) {
-          console.error(e);
-          keywords.push(k);
-        }
-        done++;
-      }
-      next.push({ ...page, keywords });
+    const refs = results.flatMap((p) => p.keywords.map(() => ({ pageId: p.pageId })));
+    const flat = results.flatMap((p) => p.keywords);
+    setProgress({ done: 0, total: flat.length, label: "Re-checking classifications" });
+    try {
+      const { results: next, summary } = await classifyResults(flat, undefined, { retryUndecided: true });
+      setResults(regroup(refs, next, results));
+      reportSummary(summary, 0, flat.length, "Re-checked");
+    } finally {
+      setProgress(null);
     }
-    setResults(next);
-    setProgress(null);
-    toast.success("Classifications re-checked.");
-  }, [results]);
+  }, [results, regroup]);
 
   const handleOverride = useCallback(
     async (domain: string, isAgency: boolean) => {
@@ -180,18 +171,12 @@ function Index() {
         reason: `Manually marked as ${isAgency ? "AGENCY" : "NOT AGENCY"}`,
         source: "manual",
       });
-      const next: PageResult[] = [];
-      for (const page of results) {
-        const keywords: KeywordResult[] = [];
-        for (const k of page.keywords) {
-          keywords.push(k.evaluated.some((e) => e.domain === domain) ? await reclassify(k) : k);
-        }
-        next.push({ ...page, keywords });
-      }
-      setResults(next);
+      const refs = results.flatMap((p) => p.keywords.map(() => ({ pageId: p.pageId })));
+      const { results: next } = await classifyResults(results.flatMap((p) => p.keywords));
+      setResults(regroup(refs, next, results));
       toast.success(`${domain} marked ${isAgency ? "AGENCY" : "NOT AGENCY"}.`);
     },
-    [results],
+    [results, regroup],
   );
 
   const exportCsv = () => {
@@ -276,7 +261,7 @@ function Index() {
         <button
           className="btn-base btn-ghost"
           disabled={running}
-          onClick={() => runAnalysis({ skipCache: true })}
+          onClick={() => runAnalysis()}
         >
           <RefreshCw className="size-4" /> Refresh Live SERPs
         </button>
