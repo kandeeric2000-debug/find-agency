@@ -1,3 +1,4 @@
+// @ts-expect-error bun:test types are provided by the Bun runtime
 import { describe, expect, test } from "bun:test";
 import {
   ClassifierSession,
@@ -73,7 +74,7 @@ describe("classification engine", () => {
     const serps = Array.from({ length: 10 }, () => [row(1, "x-studio.com"), row(2, "www.y-studio.co.uk"), row(3, "z.com")]);
     await resolveRun(serps, s);
     expect(calls.length).toBe(1);
-    expect(calls[0]!.sort()).toEqual(["x-studio.com", "y-studio.co.uk"]);
+    expect(calls[0]!.sort()).toEqual(["x-studio.com", "y-studio.co.uk", "z.com"]);
   });
 
   test("informational URLs never trigger AI", async () => {

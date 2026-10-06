@@ -174,7 +174,7 @@ export async function classifyResults(
     console.error("Classification pass failed; continuing with what is known", e);
   }
   const out = results.map((r, i) =>
-    r.error ? { ...r, needsReview: true } : buildResult({ ...r, serp: serps[i] }, session),
+    r.error ? { ...r, needsReview: true } : buildResult({ ...r, serp: serps[i]! }, session),
   );
   return { results: out, summary: { aiRequests: session.aiRequests, aiUnavailable: session.aiDisabledReason } };
 }
