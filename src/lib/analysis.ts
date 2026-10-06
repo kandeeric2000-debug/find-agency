@@ -1,14 +1,18 @@
 import { supabase } from "@/integrations/supabase/client";
-import { classifyDomains, fetchKeywordData, type SerpRow } from "@/lib/semrush.functions";
-import { ruleVerdict, rootDomain, contentPageReason, type Verdict } from "@/lib/agency-rules";
+import { classifyDomains, fetchKeywordData } from "@/lib/semrush.functions";
+import { rootDomain } from "@/lib/agency-rules";
+import {
+  ClassifierSession,
+  pickCompetitors,
+  resolveRun,
+  type CachedVerdict,
+  type EngineDeps,
+  type Evaluated,
+  type SerpRow,
+} from "@/lib/classification-engine";
 
-export type Evaluated = SerpRow & {
-  isAgency: boolean | null;
-  reason: string;
-  source: Verdict["source"];
-  companyName?: string | null;
-  selected: boolean;
-};
+export type { Evaluated };
+export { pickCompetitors };
 
 export type KeywordResult = {
   keyword: string;
@@ -64,27 +68,29 @@ type CacheRow = {
   company_name: string | null;
 };
 
-export async function loadCache(domains: string[]): Promise<Map<string, Verdict>> {
-  const map = new Map<string, Verdict>();
+export async function loadCache(domains: string[]): Promise<Map<string, CachedVerdict>> {
+  const map = new Map<string, CachedVerdict>();
   const keys = Array.from(new Set(domains.map(rootDomain)));
-  if (keys.length === 0) return map;
-  const { data, error } = await supabase
-    .from("domain_classifications")
-    .select("domain, is_agency, reason, source, company_name")
-    .in("domain", keys);
-  if (error) {
-    console.error("Classification cache read failed", error);
-    return map;
-  }
-  for (const row of (data ?? []) as CacheRow[]) {
-    // Older AI rows were based only on a domain name. Do not reuse them.
-    if (row.source !== "manual" && row.source !== "ai-evidence-v2") continue;
-    map.set(row.domain, {
-      isAgency: row.is_agency,
-      reason: row.reason,
-      source: row.source === "manual" ? "manual" : "cache",
-      companyName: row.company_name,
-    });
+  for (let i = 0; i < keys.length; i += 200) {
+    const { data, error } = await supabase
+      .from("domain_classifications")
+      .select("domain, is_agency, reason, source, company_name")
+      .in("domain", keys.slice(i, i + 200));
+    if (error) {
+      console.error("Classification cache read failed", error);
+      continue;
+    }
+    for (const row of (data ?? []) as CacheRow[]) {
+      // Older AI rows were based only on a domain name. Do not reuse them.
+      if (row.source !== "manual" && row.source !== "ai-evidence-v2") continue;
+      map.set(row.domain, {
+        isAgency: row.is_agency,
+        reason: row.reason,
+        source: row.source === "manual" ? "manual" : "cache",
+        companyName: row.company_name,
+        stored: row.source === "manual" ? "manual" : "ai",
+      });
+    }
   }
   return map;
 }
@@ -111,172 +117,66 @@ export async function saveVerdict(
   if (error) console.error("Classification cache write failed", error);
 }
 
-/** Resolve verdicts for a set of domains: rules -> cache -> AI (cached afterwards). */
-export async function resolveVerdicts(
-  domains: string[],
-  opts: { skipCache?: boolean } = {},
-): Promise<Map<string, Verdict>> {
-  const out = new Map<string, Verdict>();
-  const unknown: string[] = [];
-
-  const normalized = Array.from(new Set(domains.map(rootDomain)));
-  const cache = await loadCache(normalized);
-
-  for (const domain of normalized) {
-    const cached = cache.get(domain);
-    // A person's decision is authoritative, including over deterministic rules.
-    if (cached?.source === "manual") {
-      out.set(domain, cached);
-      continue;
-    }
-    const rule = ruleVerdict(domain);
-    if (rule) {
-      out.set(domain, rule);
-      continue;
-    }
-    if (cached && !opts.skipCache) {
-      out.set(domain, cached);
-      continue;
-    }
-    unknown.push(domain);
-  }
-
-  if (unknown.length > 0) {
-    for (let i = 0; i < unknown.length; i += 20) {
-      const batch = unknown.slice(i, i + 20);
-      const verdicts = await classifyDomains({ data: { domains: batch } });
-      for (const v of verdicts) {
-        out.set(v.domain, {
-          isAgency: v.isAgency,
-          reason: v.reason,
-          source: "ai",
-          companyName: v.companyName,
-        });
-        if (v.isAgency !== null) {
-          await saveVerdict(v.domain, {
-            isAgency: v.isAgency,
-            reason: v.reason,
-            source: "ai-evidence-v2",
-            companyName: v.companyName,
-          });
-        } else {
-          await saveVerdict(v.domain, {
-            isAgency: null,
-            reason: v.reason,
-            source: "ai-evidence-v2",
-            companyName: v.companyName,
-          });
-        }
-      }
-    }
-  }
-
-  return out;
-}
-
-/** Walk the SERP from #1 and take the first two agencies, preserving the live URL. */
-export function pickCompetitors(
-  serp: SerpRow[],
-  verdicts: Map<string, Verdict>,
-): { evaluated: Evaluated[]; competitors: Evaluated[]; needsReview: boolean } {
-  const evaluated: Evaluated[] = [];
-  const competitors: Evaluated[] = [];
-  let needsReview = false;
-
-  for (const row of serp) {
-    // Only the company behind the domain matters — page type / URL structure is irrelevant.
-    const verdict = verdicts.get(rootDomain(row.domain)) ?? {
-        isAgency: null,
-        reason: "No classification available",
-        source: "ai" as const,
-      };
-    const alreadyPicked = competitors.some((c) => rootDomain(c.domain) === rootDomain(row.domain));
-    // Blog/article ranking pages are skipped, even for agencies.
-    const contentReason = contentPageReason(row.url);
-    const select =
-      verdict.isAgency === true && !contentReason && competitors.length < 2 && !alreadyPicked;
-    const item: Evaluated = {
-      ...row,
-      isAgency: verdict.isAgency,
-      reason: contentReason
-        ? `${verdict.reason} — skipped: ${contentReason.toLowerCase()}`
-        : verdict.reason,
-      source: verdict.source,
-      companyName: verdict.companyName ?? null,
-      selected: select,
-    };
-    if (verdict.isAgency === null) needsReview = true;
-    if (select) competitors.push(item);
-    evaluated.push(item);
-    if (competitors.length === 2) break;
-  }
-
-  return { evaluated, competitors, needsReview };
-}
-
-export async function analyzeKeyword(
-  keyword: string,
-  database: string,
-  opts: { skipCache?: boolean } = {},
-): Promise<KeywordResult> {
-  const data = await fetchKeywordData({ data: { keyword, database, serpDepth: 50 } });
-  if (data.error) {
-    return {
-      keyword,
-      kd: data.kd,
-      serp: [],
-      evaluated: [],
-      competitors: [],
-      needsReview: true,
-      error: data.error,
-      fetchedAt: new Date().toISOString(),
-    };
-  }
-  const verdicts = new Map<string, Verdict>();
-  let selection = { evaluated: [] as Evaluated[], competitors: [] as Evaluated[], needsReview: false };
-  for (let i = 0; i < data.serp.length; i += 10) {
-    const rows = data.serp.slice(i, i + 10);
-    const batch = await resolveVerdicts(rows.map((r) => r.domain), opts);
-    for (const [domain, verdict] of batch) verdicts.set(domain, verdict);
-    selection = pickCompetitors(data.serp.slice(0, i + 10), verdicts);
-    if (selection.competitors.length === 2) break;
-  }
-  const { evaluated, competitors, needsReview } = selection;
+export function liveDeps(): EngineDeps {
   return {
-    keyword,
-    kd: data.kd,
-    serp: data.serp,
-    evaluated,
-    competitors,
-    needsReview: needsReview || data.kd === null,
-    error: null,
-    fetchedAt: new Date().toISOString(),
+    loadCache,
+    saveVerdict: (domain, v) => saveVerdict(domain, { ...v, source: "ai-evidence-v2" }),
+    classify: (domains) => classifyDomains({ data: { domains } }),
   };
 }
 
-/** Re-run classification on already fetched SERP rows (no new Semrush calls). */
-export async function reclassify(
-  result: KeywordResult,
-  opts: { skipCache?: boolean } = {},
-): Promise<KeywordResult> {
-  const serp: SerpRow[] = result.serp?.length
-    ? result.serp
-    : result.evaluated.map(({ position, url, domain }) => ({ position, url, domain }));
-  if (serp.length === 0) return result;
-  const verdicts = new Map<string, Verdict>();
-  let selection = { evaluated: [] as Evaluated[], competitors: [] as Evaluated[], needsReview: false };
-  for (let i = 0; i < serp.length; i += 10) {
-    const batch = await resolveVerdicts(serp.slice(i, i + 10).map((r) => r.domain), opts);
-    for (const [domain, verdict] of batch) verdicts.set(domain, verdict);
-    selection = pickCompetitors(serp.slice(0, i + 10), verdicts);
-    if (selection.competitors.length === 2) break;
+export type RunSummary = { aiRequests: number; aiUnavailable: string | null };
+
+function buildResult(base: Omit<KeywordResult, "evaluated" | "competitors" | "needsReview">, session: ClassifierSession): KeywordResult {
+  const serp = base.serp ?? [];
+  const sel = pickCompetitors(serp, session);
+  return { ...base, serp, ...sel, needsReview: sel.needsReview || base.kd === null };
+}
+
+/**
+ * Analyze a whole batch: live Semrush per keyword first, then one shared,
+ * deduplicated classification pass. AI failures never abort the run.
+ */
+export async function analyzeBatch(
+  jobs: { keyword: string; database: string }[],
+  onProgress: (done: number, label: string) => void,
+  deps: EngineDeps = liveDeps(),
+): Promise<{ results: KeywordResult[]; summary: RunSummary }> {
+  const fetched: KeywordResult[] = [];
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i]!;
+    onProgress(i, job.keyword);
+    try {
+      const data = await fetchKeywordData({ data: { keyword: job.keyword, database: job.database, serpDepth: 50 } });
+      fetched.push({ keyword: job.keyword, kd: data.kd, serp: data.serp, evaluated: [], competitors: [], needsReview: true, error: data.error, fetchedAt: new Date().toISOString() });
+    } catch (e) {
+      fetched.push({ keyword: job.keyword, kd: null, serp: [], evaluated: [], competitors: [], needsReview: true, error: e instanceof Error ? e.message : "Unknown error", fetchedAt: new Date().toISOString() });
+    }
   }
-  return {
-    ...result,
-    serp,
-    ...selection,
-    needsReview: selection.needsReview || result.kd === null,
-  };
+  onProgress(jobs.length, "Classifying companies");
+  const { results, summary } = await classifyResults(fetched, deps, {});
+  return { results, summary };
+}
+
+/** Classify already-fetched results (no Semrush calls). Used by Run, Recheck and overrides. */
+export async function classifyResults(
+  results: KeywordResult[],
+  deps: EngineDeps = liveDeps(),
+  opts: { retryUndecided?: boolean } = {},
+): Promise<{ results: KeywordResult[]; summary: RunSummary }> {
+  const session = new ClassifierSession(deps, opts);
+  const serps = results.map((r) =>
+    r.error ? [] : r.serp?.length ? r.serp : r.evaluated.map(({ position, url, domain }) => ({ position, url, domain })),
+  );
+  try {
+    await resolveRun(serps, session);
+  } catch (e) {
+    console.error("Classification pass failed; continuing with what is known", e);
+  }
+  const out = results.map((r, i) =>
+    r.error ? { ...r, needsReview: true } : buildResult({ ...r, serp: serps[i]! }, session),
+  );
+  return { results: out, summary: { aiRequests: session.aiRequests, aiUnavailable: session.aiDisabledReason } };
 }
 
 export function formatKeywordBlock(r: KeywordResult): string {

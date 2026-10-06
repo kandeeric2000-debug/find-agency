@@ -103,12 +103,8 @@ export const fetchKeywordData = createServerFn({ method: "POST" })
     }
   });
 
-export type AiVerdict = {
-  domain: string;
-  isAgency: boolean | null;
-  companyName: string | null;
-  reason: string;
-};
+import type { AiVerdict, ClassifyOutcome } from "@/lib/classification-engine";
+export type { AiVerdict, ClassifyOutcome };
 
 const SYSTEM_PROMPT = `You classify the COMPANY behind a website as AGENCY or NOT AGENCY.
 
@@ -171,10 +167,10 @@ export const classifyDomains = createServerFn({ method: "POST" })
     ).slice(0, 40);
     return { domains };
   })
-  .handler(async ({ data }): Promise<AiVerdict[]> => {
-    if (data.domains.length === 0) return [];
+  .handler(async ({ data }): Promise<ClassifyOutcome> => {
+    if (data.domains.length === 0) return { verdicts: [], error: null };
     const key = process.env["LOVABLE_API_KEY"];
-    if (!key) throw new Error("AI classification is unavailable.");
+    if (!key) return { verdicts: [], error: { kind: "other", message: "AI classification is not configured" } };
 
     const evidence = await Promise.all(
       data.domains.map(async (domain) => ({ domain, evidence: await getCompanyEvidence(domain) })),
@@ -200,9 +196,12 @@ export const classifyDomains = createServerFn({ method: "POST" })
     const text = await res.text();
     if (!res.ok) {
       console.error(`AI classification failed [${res.status}]: ${text}`);
-      if (res.status === 429) throw new Error("AI rate limit reached — try again in a moment.");
-      if (res.status === 402) throw new Error("AI credits exhausted for this workspace.");
-      throw new Error(`AI classification failed [${res.status}]`);
+      // Never throw: the run must continue with deterministic results.
+      if (res.status === 402 || (res.status === 403 && /credit/i.test(text)))
+        return { verdicts: [], error: { kind: "credits", message: "AI credits exhausted" } };
+      if (res.status === 429)
+        return { verdicts: [], error: { kind: "rate", message: "AI rate limit reached" } };
+      return { verdicts: [], error: { kind: "other", message: `AI classification failed [${res.status}]` } };
     }
 
     let parsed: { results?: AiVerdict[] } = {};
@@ -225,7 +224,7 @@ export const classifyDomains = createServerFn({ method: "POST" })
       });
     }
 
-    return data.domains.map(
+    const verdicts = data.domains.map(
       (domain) =>
         byDomain.get(domain) ?? {
           domain,
@@ -234,4 +233,5 @@ export const classifyDomains = createServerFn({ method: "POST" })
           reason: "Classifier returned no verdict — needs review",
         },
     );
+    return { verdicts, error: null };
   });
