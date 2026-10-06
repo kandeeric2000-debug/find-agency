@@ -8,3 +8,4 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+- Classification runs through src/lib/classification-engine.ts: manual > rules > cache > one deduplicated AI pass per run; AI errors never throw (classifyDomains returns {verdicts,error}) — keeps runs finishing and AI credit use minimal.
