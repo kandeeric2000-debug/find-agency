@@ -49,7 +49,7 @@ describe("Copy Results formatting", () => {
     expect(out).toBe(
       "website design calgary — KD 18\n#1\nhttps://www.first.com/\n#2\nhttps://www.second.com/",
     );
-    expect(out).not.toContain("#2");
+    expect(out.startsWith("website design calgary — KD 18\n#1\n")).toBe(true);
   });
 
   test("labels are #1/#2 order, not the actual SERP positions", () => {
