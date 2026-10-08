@@ -8,4 +8,5 @@
 - [x] Batch queue: up to 100 page batches (JSON/CSV import), retries, resume, per-batch TXT + ZIP + manifest
 - [x] GitHub Actions workflow_dispatch runner using batch file path
 - [ ] BATCH_RUNNER_TOKEN secret in Lovable + GitHub (needs user)
+- [x] Paste TXT / Import Text bulk input with editable preview
 - [ ] GitHub sync to kandeeric2000-debug/find-agency (needs user verification in editor)
