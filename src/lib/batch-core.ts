@@ -46,8 +46,8 @@ function str(v: unknown): string {
  */
 export function stripVolume(s: string): string {
   return s
-    .replace(/\s*\(\s*(?:(?:search\s*)?vol(?:ume)?\.?\s*[:=]?\s*)?[\d][\d,.]*\s*[kKmM]?\s*\)\s*$/, "")
-    .replace(/\s+[—–-]+\s*(?:(?:search\s*)?vol(?:ume)?\.?\s*[:=]?\s*)?[\d][\d,.]*\s*[kKmM]?\s*$/, "")
+    .replace(/\s*\(\s*(?:(?:search\s*)?vol(?:ume)?\.?\s*[:=]?\s*)?[\d][\d,.]*\s*[kKmM]?\s*\)\s*$/i, "")
+    .replace(/\s+[—–-]+\s*(?:(?:search\s*)?vol(?:ume)?\.?\s*[:=]?\s*)?[\d][\d,.]*\s*[kKmM]?\s*$/i, "")
     .replace(/\s*[—–-]?\s*(?:search\s*)?vol(?:ume)?\.?\s*[:=]\s*[\d][\d,.]*\s*[kKmM]?\s*$/i, "")
     .replace(/\t+[\d][\d,.]*\s*[kKmM]?\s*$/, "")
     .trim();
