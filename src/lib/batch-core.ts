@@ -308,3 +308,119 @@ export async function runQueue(states: BatchState[], analyze: AnalyzeFn, opts: R
 export function initialStates(batches: BatchInput[]): BatchState[] {
   return batches.map((batch) => ({ batch, status: "pending", results: [], error: null, attempts: 0, finishedAt: null }));
 }
+
+// ---------- free-text (pasted TXT) import ----------
+
+export type TextBatchDraft = {
+  name: string;
+  rank: string;
+  targetUrl: string;
+  country: string;
+  database: string;
+  keywords: string[];
+  /** Raw metadata lines exactly as pasted (label -> value). */
+  meta: Record<string, string>;
+  expectedCount: number | null;
+  /** Keyword lines that may hold several phrases with no separator. */
+  ambiguous: string[];
+  warnings: string[];
+};
+
+const COUNTRY_DB: Record<string, string> = {
+  usa: "us", us: "us", "united states": "us", uk: "uk", "united kingdom": "uk", gb: "uk", canada: "ca", ca: "ca",
+  australia: "au", au: "au", germany: "de", france: "fr", spain: "es", italy: "it", netherlands: "nl", india: "in",
+  brazil: "br", mexico: "mx", uae: "ae", "united arab emirates": "ae", sweden: "se", norway: "no", denmark: "dk", singapore: "sg",
+};
+
+const META_RE = /^\s*(page\s*rank|rank|url|target\s*url|country|database|db|volume|avg\.?\s*kd|opportunity|hierarchy\s*changes|keywords?)\b[^:]*:\s*(.*)$/i;
+const PAGE_RE = /^\s*page(?!\s*rank)\s*[:\-–—]?\s+(.+)$|^\s*page\s*:\s*(.+)$/i;
+
+/** Last number in a value such as "39 → 42" or "20". */
+function lastNumber(v: string): number | null {
+  const m = v.replace(/,/g, "").match(/\d+(?:\.\d+)?/g);
+  return m ? Number(m[m.length - 1]) : null;
+}
+
+function cleanKeyword(s: string): string {
+  return s.replace(/^\s*(?:[-*•·]|\d+[.)])\s+/, "").replace(/^["'“”]+|["'“”]+$/g, "").trim();
+}
+
+/** A separator-free line this long is probably several phrases run together. */
+function looksAmbiguous(line: string): boolean {
+  return line.split(/\s+/).length >= 7;
+}
+
+export function parseBatchesText(text: string): TextBatchDraft[] {
+  const drafts: TextBatchDraft[] = [];
+  let cur: TextBatchDraft | null = null;
+  const start = (name: string) => {
+    cur = { name: name.trim(), rank: "", targetUrl: "", country: "", database: "", keywords: [], meta: {}, expectedCount: null, ambiguous: [], warnings: [] };
+    drafts.push(cur);
+  };
+  const addKeywords = (raw: string) => {
+    if (!cur) return;
+    const parts = raw.includes(";") || raw.includes("|") ? raw.split(/[;|]/) : [raw];
+    for (const p of parts) {
+      const kw = cleanKeyword(p);
+      if (!kw) continue;
+      if (parts.length === 1 && looksAmbiguous(kw)) cur.ambiguous.push(kw);
+      cur.keywords.push(kw);
+    }
+  };
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const page = line.match(PAGE_RE);
+    if (page && !META_RE.test(line)) {
+      start((page[1] ?? page[2] ?? "").replace(/^[:\s]+/, ""));
+      continue;
+    }
+    const meta = line.match(META_RE);
+    if (meta && cur) {
+      const c: TextBatchDraft = cur;
+      const label = meta[1]!.toLowerCase().replace(/\s+/g, " ");
+      const value = meta[2]!.trim();
+      c.meta[meta[1]!.trim()] = value;
+      if (label.startsWith("keyword")) {
+        // "Keywords: 39 → 42" is a count; anything else is an inline keyword list.
+        if (/^[\d\s.,→\->]*$/.test(value)) c.expectedCount = lastNumber(value);
+        else addKeywords(value);
+      } else if (label.includes("rank")) c.rank = value.replace(/^#/, "").trim();
+      else if (label.includes("url")) c.targetUrl = value;
+      else if (label === "country") c.country = value;
+      else if (label === "database" || label === "db") c.database = value.toLowerCase();
+      continue;
+    }
+    addKeywords(line);
+  }
+  for (const d of drafts) {
+    if (!d.database) d.database = COUNTRY_DB[d.country.toLowerCase()] ?? (d.name.match(/—\s*(\w[\w ]*)$/)?.[1] ? COUNTRY_DB[d.name.match(/—\s*(\w[\w ]*)$/)![1]!.toLowerCase()] ?? "" : "");
+    if (!d.country && d.database) d.country = d.database.toUpperCase();
+    validateDraft(d);
+  }
+  if (drafts.length > MAX_BATCHES) throw new Error(`Too many batches: ${drafts.length} (max ${MAX_BATCHES})`);
+  return drafts;
+}
+
+/** Recompute warnings after parsing or editing. */
+export function validateDraft(d: TextBatchDraft): TextBatchDraft {
+  const w: string[] = [];
+  if (!d.name) w.push("Page name is missing");
+  if (!/^[a-z]{2}$/.test(d.database)) w.push("Semrush database is missing or invalid");
+  if (d.keywords.length === 0) w.push("No keywords found");
+  if (d.expectedCount !== null && d.expectedCount !== d.keywords.length)
+    w.push(`Keyword count mismatch: metadata says ${d.expectedCount}, found ${d.keywords.length}`);
+  d.ambiguous = d.ambiguous.filter((a) => d.keywords.includes(a));
+  if (d.ambiguous.length)
+    w.push(`${d.ambiguous.length} line(s) may contain several phrases with no separator — put one keyword per line or separate with ";"`);
+  d.warnings = w;
+  return d;
+}
+
+/** Blocking problems (warnings like count mismatch can be confirmed instead). */
+export function draftErrors(d: TextBatchDraft): string[] {
+  return d.warnings.filter((w) => !w.startsWith("Keyword count mismatch") && !w.includes("several phrases"));
+}
+
+export function draftToBatch(d: TextBatchDraft, i: number): BatchInput {
+  return normalizeBatch({ name: d.name, rank: d.rank, targetUrl: d.targetUrl, country: d.country, database: d.database, keywords: d.keywords }, i);
+}
