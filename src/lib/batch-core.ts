@@ -397,14 +397,12 @@ export function parseBatchesText(text: string): TextBatchDraft[] {
     const section = line.match(/^\s*(primary|secondary|tertiary|keywords?)\b([^:]*)(?::\s*(.*))?$/i);
     if (section && (heading || section[3] !== undefined || /^\s*(keywords?|\(.*\))?\s*$/i.test(section[2]!))) {
       const inline = (section[3] ?? "").trim();
-      if (/^(primary|secondary|tertiary)$/i.test(section[1]!) && inline && !/^[\d\s.,→\->()a-z]*$/i.test(inline.replace(/keywords?|volume/gi, "")) ) addKeywords(inline);
-      else if (/^(primary|secondary|tertiary)$/i.test(section[1]!) && inline.includes(";")) addKeywords(inline);
-      else if (!/^(primary|secondary|tertiary)$/i.test(section[1]!)) {
-        if (cur) {
-          const c: TextBatchDraft = cur;
-          if (!inline || /^[\d\s.,→\->]*$/.test(inline)) { if (inline) { c.meta[section[1]!.trim()] = inline; c.expectedCount = lastNumber(inline); } }
-          else { c.meta[section[1]!.trim()] = inline; addKeywords(inline); }
-        }
+      const isCount = /^[\d\s.,→\->()]*(?:keywords?)?[\s)]*$/i.test(inline);
+      if (cur && inline) {
+        const c: TextBatchDraft = cur;
+        if (isCount) {
+          if (/^keywords?$/i.test(section[1]!)) { c.meta[section[1]!.trim()] = inline; c.expectedCount = lastNumber(inline); }
+        } else addKeywords(inline);
       }
       continue;
     }
