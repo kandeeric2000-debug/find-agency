@@ -10,33 +10,43 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiPublicBatchKeywordsRouteImport } from './routes/api/public/batch-keywords'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicBatchKeywordsRoute = ApiPublicBatchKeywordsRouteImport.update({
+  id: '/api/public/batch-keywords',
+  path: '/api/public/batch-keywords',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/public/batch-keywords': typeof ApiPublicBatchKeywordsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/public/batch-keywords': typeof ApiPublicBatchKeywordsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/public/batch-keywords': typeof ApiPublicBatchKeywordsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/api/public/batch-keywords'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/api/public/batch-keywords'
+  id: '__root__' | '/' | '/api/public/batch-keywords'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiPublicBatchKeywordsRoute: typeof ApiPublicBatchKeywordsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +58,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/batch-keywords': {
+      id: '/api/public/batch-keywords'
+      path: '/api/public/batch-keywords'
+      fullPath: '/api/public/batch-keywords'
+      preLoaderRoute: typeof ApiPublicBatchKeywordsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiPublicBatchKeywordsRoute: ApiPublicBatchKeywordsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

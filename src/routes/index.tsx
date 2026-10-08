@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Play, RefreshCw, ScanSearch, Download, Copy, Plus, Loader2, FileText } from "lucide-react";
 import { PageConfig } from "@/components/PageConfig";
 import { ResultsView } from "@/components/ResultsView";
+import { BatchQueue } from "@/components/BatchQueue";
 import {
   analyzeBatch,
   classifyResults,
@@ -314,6 +315,7 @@ function Index() {
           <ResultsView pages={results} view={view} onOverride={handleOverride} />
         </>
       )}
+      <BatchQueue />
     </main>
   );
 }
