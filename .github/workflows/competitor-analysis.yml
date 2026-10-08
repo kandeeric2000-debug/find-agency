@@ -15,6 +15,16 @@ on:
         description: "Published app URL (overrides the APP_URL repository variable)"
         required: false
         default: ""
+  # Unattended trigger: any commit to main that changes files under batches/
+  # runs the default batch file (or the AUTO_BATCH_FILE repository variable).
+  push:
+    branches: [main]
+    paths:
+      - "batches/**"
+
+concurrency:
+  group: competitor-analysis-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -27,7 +37,7 @@ jobs:
         env:
           APP_URL: ${{ inputs.app_url || vars.APP_URL || 'https://find-agency.lovable.app' }}
           BATCH_RUNNER_TOKEN: ${{ secrets.BATCH_RUNNER_TOKEN }}
-          BATCH_FILE: ${{ inputs.batch_file }}
+          BATCH_FILE: ${{ inputs.batch_file || vars.AUTO_BATCH_FILE || 'batches/houston-st-petersburg.json' }}
           ONLY: ${{ inputs.only }}
           OUT_DIR: out
         run: bun scripts/run-batches.ts
