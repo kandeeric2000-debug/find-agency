@@ -40,7 +40,10 @@ export function TextImport({ disabled, room, onAdd }: Props) {
 
   const add = () => {
     if (!drafts) return;
-    if (drafts.length > room) return toast.error(`Only ${room} more batches fit (max ${MAX_BATCHES}).`);
+    if (drafts.length > room) {
+      toast.error(`Only ${room} more batches fit (max ${MAX_BATCHES}).`);
+      return;
+    }
     onAdd(drafts.map(draftToBatch));
     toast.success(`Added ${drafts.length} batches (${totalKw} keywords) to the queue.`);
     setDrafts(null);
