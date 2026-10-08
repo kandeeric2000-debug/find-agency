@@ -64,3 +64,42 @@ describe("queue", () => {
     expect(formatBatchTxt(out[1]!)).toContain("b1\nNeeds Review");
   });
 });
+
+import { parseBatchesText } from "./batch-core";
+describe("text import", () => {
+  const txt = `PAGE Houston Web Design — USA
+Page Rank: #33
+URL: /us/houston-web-design/
+Country: USA
+Keywords: 39 → 42
+Volume: 9450 → 9680
+Avg KD: 24.62 → 24.10
+Opportunity: 319.09 → 332.70
+web design houston; houston website design; houston website design
+
+Page: St Petersburg Web Design — USA
+Page Rank: #34
+URL: /us/st-petersburg-web-design/
+Country: USA
+Keywords: 2
+Hierarchy Changes: None
+st petersburg web design
+st. petersburg web design
+web design st petersburg fl website design firm st petersburg st petersburg web design`;
+  test("splits pages, keeps metadata out of keywords, keeps duplicates", () => {
+    const d = parseBatchesText(txt);
+    expect(d.length).toBe(2);
+    expect(d[0]!.keywords).toEqual(["web design houston", "houston website design", "houston website design"]);
+    expect(d[0]!.rank).toBe("33");
+    expect(d[0]!.database).toBe("us");
+    expect(d[0]!.expectedCount).toBe(42);
+    expect(d[0]!.meta["Avg KD"]).toBe("24.62 → 24.10");
+    expect(d[0]!.warnings.some((w) => w.includes("mismatch"))).toBe(true);
+  });
+  test("flags run-together phrases instead of guessing", () => {
+    const d = parseBatchesText(txt)[1]!;
+    expect(d.keywords.length).toBe(3);
+    expect(d.ambiguous.length).toBe(1);
+    expect(d.warnings.some((w) => w.includes("several phrases"))).toBe(true);
+  });
+});

@@ -234,6 +234,9 @@ function Index() {
           SERP from Semrush, walk the results from position #1, and keep the exact ranking URLs of
           the first two results published by an actual agency.
         </p>
+        <a href="#paste-txt" className="btn-base btn-primary mt-4 inline-flex">
+          Paste TXT / Import Text (up to 100 pages)
+        </a>
       </header>
 
       <div className="space-y-5">
