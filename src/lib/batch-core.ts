@@ -40,9 +40,22 @@ function str(v: unknown): string {
   return v == null ? "" : String(v).trim();
 }
 
+/**
+ * Remove a trailing search-volume value: "kw — 1,300", "kw - 590", "kw (Volume: 320)",
+ * "kw — Volume: 1.2k", "kw\t880". Plain trailing numbers without a separator are kept.
+ */
+export function stripVolume(s: string): string {
+  return s
+    .replace(/\s*\(\s*(?:(?:search\s*)?vol(?:ume)?\.?\s*[:=]?\s*)?[\d][\d,.]*\s*[kKmM]?\s*\)\s*$/, "")
+    .replace(/\s+[—–-]+\s*(?:(?:search\s*)?vol(?:ume)?\.?\s*[:=]?\s*)?[\d][\d,.]*\s*[kKmM]?\s*$/, "")
+    .replace(/\s*[—–-]?\s*(?:search\s*)?vol(?:ume)?\.?\s*[:=]\s*[\d][\d,.]*\s*[kKmM]?\s*$/i, "")
+    .replace(/\t+[\d][\d,.]*\s*[kKmM]?\s*$/, "")
+    .trim();
+}
+
 function splitKeywords(v: unknown): string[] {
   const list = Array.isArray(v) ? v.map(str) : str(v).split(/\r?\n|;/).map((s) => s.trim());
-  return list.filter(Boolean); // duplicates are kept on purpose: never drop entries
+  return list.map(stripVolume).filter(Boolean); // duplicates are kept on purpose: never drop entries
 }
 
 let idCounter = 0;
@@ -332,7 +345,7 @@ const COUNTRY_DB: Record<string, string> = {
   brazil: "br", mexico: "mx", uae: "ae", "united arab emirates": "ae", sweden: "se", norway: "no", denmark: "dk", singapore: "sg",
 };
 
-const META_RE = /^\s*(page\s*rank|rank|url|target\s*url|country|database|db|volume|avg\.?\s*kd|opportunity|hierarchy\s*changes|keywords?)\b[^:]*:\s*(.*)$/i;
+const META_RE = /^\s*(page\s*rank|rank|url|target\s*url|country|database|db|total\s*(?:search\s*)?volume|total\s*keywords?|keyword\s*count|search\s*volume|volume|avg\.?\s*kd|opportunity|hierarchy\s*changes|keywords?)\b[^:]*:\s*(.*)$/i;
 const PAGE_RE = /^\s*page(?!\s*rank)\s*[:\-–—]?\s+(.+)$|^\s*page\s*:\s*(.+)$/i;
 
 /** Last number in a value such as "39 → 42" or "20". */
@@ -342,7 +355,8 @@ function lastNumber(v: string): number | null {
 }
 
 function cleanKeyword(s: string): string {
-  return s.replace(/^\s*(?:[-*•·]|\d+[.)])\s+/, "").replace(/^["'“”]+|["'“”]+$/g, "").trim();
+  const t = s.replace(/^\s*(?:[-*+•·]|\d+[.)])\s+/, "").replace(/\*\*|__|`/g, "").replace(/^["'“”]+|["'“”]+$/g, "").trim();
+  return stripVolume(t).replace(/^["'“”]+|["'“”]+$/g, "").trim();
 }
 
 /** A separator-free line this long is probably several phrases run together. */
@@ -367,8 +381,38 @@ export function parseBatchesText(text: string): TextBatchDraft[] {
       cur.keywords.push(kw);
     }
   };
-  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
-    if (!line.trim()) continue;
+  for (const rawLine of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    // Markdown: strip bullets/bold so "- **URL:** /x/" reads as metadata.
+    const heading = rawLine.match(/^\s*(#{1,6})\s+(.*)$/);
+    let line = (heading ? heading[2]! : rawLine).replace(/\*\*|__/g, "").replace(/^\s*[-*+]\s+(?=[^:]{1,40}:)/, "");
+    if (!line.trim() || /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) continue;
+    // "Page Rank #36 — Tyler Web Design — USA" heading/line starts a page.
+    const rankHead = line.match(/^\s*page\s*rank\s*:?\s*#?\s*(\d+)\s*[—–\-:|]+\s*(.+)$/i);
+    if (rankHead) {
+      start(rankHead[2]!.replace(/^page\s*[:\-–—]?\s*/i, ""));
+      cur!.rank = rankHead[1]!;
+      continue;
+    }
+    // Primary / Secondary / Tertiary (and "Keywords") section headings are never keywords.
+    const section = line.match(/^\s*(primary|secondary|tertiary|keywords?)\b([^:]*)(?::\s*(.*))?$/i);
+    if (section && (heading || section[3] !== undefined || /^\s*(keywords?|\(.*\))?\s*$/i.test(section[2]!))) {
+      const inline = (section[3] ?? "").trim();
+      if (/^(primary|secondary|tertiary)$/i.test(section[1]!) && inline && !/^[\d\s.,→\->()a-z]*$/i.test(inline.replace(/keywords?|volume/gi, "")) ) addKeywords(inline);
+      else if (/^(primary|secondary|tertiary)$/i.test(section[1]!) && inline.includes(";")) addKeywords(inline);
+      else if (!/^(primary|secondary|tertiary)$/i.test(section[1]!)) {
+        if (cur) {
+          const c: TextBatchDraft = cur;
+          if (!inline || /^[\d\s.,→\->]*$/.test(inline)) { if (inline) { c.meta[section[1]!.trim()] = inline; c.expectedCount = lastNumber(inline); } }
+          else { c.meta[section[1]!.trim()] = inline; addKeywords(inline); }
+        }
+      }
+      continue;
+    }
+    if (heading) {
+      const page = line.match(PAGE_RE);
+      if (heading[1]!.length <= 2 || page) start(page ? (page[1] ?? page[2] ?? "") : line);
+      continue;
+    }
     const page = line.match(PAGE_RE);
     if (page && !META_RE.test(line)) {
       start((page[1] ?? page[2] ?? "").replace(/^[:\s]+/, ""));
@@ -380,7 +424,11 @@ export function parseBatchesText(text: string): TextBatchDraft[] {
       const label = meta[1]!.toLowerCase().replace(/\s+/g, " ");
       const value = meta[2]!.trim();
       c.meta[meta[1]!.trim()] = value;
-      if (label.startsWith("keyword")) {
+      if (/volume/.test(label)) {
+        // volume metadata — kept raw, never a keyword
+      } else if (/^(total keywords?|keyword count)$/.test(label)) {
+        c.expectedCount = lastNumber(value);
+      } else if (label.startsWith("keyword")) {
         // "Keywords: 39 → 42" is a count; anything else is an inline keyword list.
         if (/^[\d\s.,→\->]*$/.test(value)) c.expectedCount = lastNumber(value);
         else addKeywords(value);
