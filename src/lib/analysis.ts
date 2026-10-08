@@ -58,6 +58,7 @@ export const DATABASES: { code: string; country: string }[] = [
   { code: "se", country: "Sweden" },
   { code: "no", country: "Norway" },
   { code: "dk", country: "Denmark" },
+  { code: "sg", country: "Singapore" },
 ];
 
 type CacheRow = {
