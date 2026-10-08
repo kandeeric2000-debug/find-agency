@@ -5,3 +5,7 @@
 - [x] Copy-all-results option verified (Copy Results button copies the full formatted output)
 - [x] Replace stale domain-name guesses with versioned, website-evidence classifications
 - [x] Search through up to 50 live organic results until two verified agencies are found
+- [x] Batch queue: up to 100 page batches (JSON/CSV import), retries, resume, per-batch TXT + ZIP + manifest
+- [x] GitHub Actions workflow_dispatch runner using batch file path
+- [ ] BATCH_RUNNER_TOKEN secret in Lovable + GitHub (needs user)
+- [ ] GitHub sync to kandeeric2000-debug/find-agency (needs user verification in editor)

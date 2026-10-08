@@ -1,0 +1,45 @@
+name: Competitor analysis batches
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_file:
+        description: "Path in the repo to a batch file (JSON or CSV, up to 100 batches)"
+        required: true
+        default: "batches/houston-st-petersburg.json"
+      only:
+        description: "Optional comma-separated batch slugs to run (e.g. houston-web-design-usa). Empty = all"
+        required: false
+        default: ""
+      app_url:
+        description: "Published app URL (overrides the APP_URL repository variable)"
+        required: false
+        default: ""
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Run batches
+        env:
+          APP_URL: ${{ inputs.app_url || vars.APP_URL || 'https://find-agency.lovable.app' }}
+          BATCH_RUNNER_TOKEN: ${{ secrets.BATCH_RUNNER_TOKEN }}
+          BATCH_FILE: ${{ inputs.batch_file }}
+          ONLY: ${{ inputs.only }}
+          OUT_DIR: out
+        run: bun scripts/run-batches.ts
+      - name: Zip results
+        if: always()
+        run: |
+          if [ -d out ]; then cd out && zip -r ../competitor-results.zip . ; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: competitor-results
+          path: |
+            out/
+            competitor-results.zip
+          if-no-files-found: warn
