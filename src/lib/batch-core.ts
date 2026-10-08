@@ -51,7 +51,9 @@ function makeId(i: number): string {
   return `b${Date.now().toString(36)}-${i}-${idCounter}`;
 }
 
-function normalizeBatch(raw: Record<string, unknown>, i: number): BatchInput {
+type RawBatch = { name?: unknown; page?: unknown; page_name?: unknown; pageName?: unknown; database?: unknown; db?: unknown; keywords?: unknown; rank?: unknown; page_rank?: unknown; pageRank?: unknown; targetUrl?: unknown; target_url?: unknown; url?: unknown; country?: unknown };
+
+function normalizeBatch(raw: RawBatch, i: number): BatchInput {
   const name = str(raw.name ?? raw.page ?? raw.page_name ?? raw.pageName);
   const database = (str(raw.database ?? raw.db) || "us").toLowerCase();
   const keywords = splitKeywords(raw.keywords);
@@ -80,7 +82,7 @@ export function parseBatchesJson(text: string): BatchInput[] {
   const data = JSON.parse(text) as unknown;
   const list = Array.isArray(data) ? data : (data as { batches?: unknown[] })?.batches;
   if (!Array.isArray(list)) throw new Error('JSON must be an array or { "batches": [...] }');
-  return checkCount(list.map((b, i) => normalizeBatch(b as Record<string, unknown>, i)));
+  return checkCount(list.map((b, i) => normalizeBatch(b as RawBatch, i)));
 }
 
 function parseCsvRows(text: string): string[][] {
@@ -123,7 +125,7 @@ export function parseBatchesCsv(text: string): BatchInput[] {
   const iCountry = col("country");
   const iDb = col("database", "db");
   const iRank = col("rank", "page_rank");
-  const groups = new Map<string, Record<string, unknown> & { keywords: string[] }>();
+  const groups = new Map<string, RawBatch & { keywords: string[] }>();
   rows.slice(1).forEach((r, n) => {
     const get = (i: number) => (i >= 0 ? (r[i] ?? "").trim() : "");
     const name = get(iName);
