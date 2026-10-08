@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Upload, Play, Square, Download, Archive, Trash2, Loader2 } from "lucide-react";
 import { analyzeBatch } from "@/lib/analysis";
+import { TextImport } from "@/components/TextImport";
 import {
   MAX_BATCHES,
   batchFileName,
@@ -142,6 +143,12 @@ export function BatchQueue() {
           </button>
         </div>
       </header>
+
+      <TextImport
+        disabled={running}
+        room={MAX_BATCHES - states.length}
+        onAdd={(b) => setStates((prev) => [...prev, ...initialStates(b)])}
+      />
 
       {states.length > 0 && (
         <>
