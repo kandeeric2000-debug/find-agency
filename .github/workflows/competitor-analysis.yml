@@ -32,12 +32,23 @@ jobs:
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Pick batch file
+        id: pick
+        run: |
+          f="${{ inputs.batch_file }}"
+          if [ -z "$f" ] && [ "${{ github.event_name }}" = "push" ]; then
+            f=$(git diff --name-only --diff-filter=AM "${{ github.event.before }}" "${{ github.sha }}" -- 'batches/*.json' 'batches/*.csv' 2>/dev/null | tail -n1 || true)
+          fi
+          [ -z "$f" ] && f="${{ vars.AUTO_BATCH_FILE || 'batches/houston-st-petersburg.json' }}"
+          echo "Using $f"; echo "file=$f" >> "$GITHUB_OUTPUT"
       - uses: oven-sh/setup-bun@v2
       - name: Run batches
         env:
           APP_URL: ${{ inputs.app_url || vars.APP_URL || 'https://find-agency.lovable.app' }}
           BATCH_RUNNER_TOKEN: ${{ secrets.BATCH_RUNNER_TOKEN }}
-          BATCH_FILE: ${{ inputs.batch_file || vars.AUTO_BATCH_FILE || 'batches/houston-st-petersburg.json' }}
+          BATCH_FILE: ${{ steps.pick.outputs.file }}
           ONLY: ${{ inputs.only }}
           OUT_DIR: out
         run: bun scripts/run-batches.ts
