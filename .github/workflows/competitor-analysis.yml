@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       batch_file:
-        description: "Path in the repo to a batch file (JSON or CSV, up to 100 batches)"
+        description: "Path(s) in the repo to batch files (JSON or CSV, up to 100 batches each). Comma-separate for several."
         required: true
         default: "batches/houston-st-petersburg.json"
       only:
@@ -15,8 +15,8 @@ on:
         description: "Published app URL (overrides the APP_URL repository variable)"
         required: false
         default: ""
-  # Unattended trigger: any commit to main that changes files under batches/
-  # runs the default batch file (or the AUTO_BATCH_FILE repository variable).
+  # Unattended trigger: any commit to main that adds/changes batch files under
+  # batches/ runs every changed file (one job each). Falls back to AUTO_BATCH_FILE.
   push:
     branches: [main]
     paths:
@@ -27,40 +27,95 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  run:
+  pick:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    outputs:
+      files: ${{ steps.pick.outputs.files }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
-      - name: Pick batch file
+          fetch-depth: 0
+      - name: Pick batch files
         id: pick
+        env:
+          INPUT_FILES: ${{ inputs.batch_file }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          FALLBACK: ${{ vars.AUTO_BATCH_FILE || 'batches/houston-st-petersburg.json' }}
         run: |
-          f="${{ inputs.batch_file }}"
-          if [ -z "$f" ] && [ "${{ github.event_name }}" = "push" ]; then
-            f=$(git diff --name-only --diff-filter=AM "${{ github.event.before }}" "${{ github.sha }}" -- 'batches/*.json' 'batches/*.csv' 2>/dev/null | tail -n1 || true)
+          if [ -n "$INPUT_FILES" ]; then
+            list=$(echo "$INPUT_FILES" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$')
+          else
+            list=$(git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" -- 'batches/*.json' 'batches/*.csv' 2>/dev/null || true)
           fi
-          [ -z "$f" ] && f="${{ vars.AUTO_BATCH_FILE || 'batches/houston-st-petersburg.json' }}"
-          echo "Using $f"; echo "file=$f" >> "$GITHUB_OUTPUT"
+          [ -z "$list" ] && list="$FALLBACK"
+          echo "Batch files:"; echo "$list"
+          echo "files=$(echo "$list" | sort | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: pick
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        file: ${{ fromJson(needs.pick.outputs.files) }}
+    steps:
+      - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - name: Artifact name
+        id: name
+        run: echo "name=$(basename '${{ matrix.file }}' | sed 's/\.[^.]*$//')" >> "$GITHUB_OUTPUT"
       - name: Run batches
         env:
           APP_URL: ${{ inputs.app_url || vars.APP_URL || 'https://find-agency.lovable.app' }}
           BATCH_RUNNER_TOKEN: ${{ secrets.BATCH_RUNNER_TOKEN }}
-          BATCH_FILE: ${{ steps.pick.outputs.file }}
+          BATCH_FILE: ${{ matrix.file }}
           ONLY: ${{ inputs.only }}
           OUT_DIR: out
         run: bun scripts/run-batches.ts
-      - name: Zip results
+      - name: Receipt
         if: always()
         run: |
-          if [ -d out ]; then cd out && zip -r ../competitor-results.zip . ; fi
+          mkdir -p out
+          printf 'Batch file: %s\nRun ID: %s\nRun URL: %s/%s/actions/runs/%s\nCommit: %s\nFinished: %s\n' \
+            "${{ matrix.file }}" "${{ github.run_id }}" "${{ github.server_url }}" "${{ github.repository }}" "${{ github.run_id }}" "${{ github.sha }}" "$(date -u +%FT%TZ)" > out/RECEIPT.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: competitor-results
-          path: |
-            out/
-            competitor-results.zip
+          name: results-${{ steps.name.outputs.name }}
+          path: out/
+          retention-days: 90
           if-no-files-found: warn
+
+  combine:
+    needs: run
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: all
+          pattern: results-*
+      - name: Combined manifest
+        run: |
+          echo '{"run_id": "${{ github.run_id }}", "parts": [' > combined-manifest.json
+          first=1
+          for d in all/*/; do
+            n=$(basename "$d")
+            m="$d/manifest.json"; [ -f "$m" ] || m=/dev/null
+            [ $first -eq 1 ] || echo ',' >> combined-manifest.json; first=0
+            if [ -s "$m" ]; then jq -c --arg n "$n" '{artifact:$n, batches, succeeded, partial, failed, keywords:([.entries[].keywords]|add), analyzed:([.entries[].analyzed]|add), failedKeywords:([.entries[].failedKeywords[]])}' "$m" >> combined-manifest.json
+            else echo "{\"artifact\":\"$n\",\"error\":\"no manifest\"}" >> combined-manifest.json; fi
+          done
+          echo ']}' >> combined-manifest.json
+          jq . combined-manifest.json
+          (cd all && zip -r ../competitor-results-all.zip .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combined-results
+          path: |
+            combined-manifest.json
+            competitor-results-all.zip
+          retention-days: 90
